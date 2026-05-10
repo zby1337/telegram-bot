@@ -9,6 +9,8 @@ import requests
 from bs4 import BeautifulSoup
 import asyncio
 import os
+import threading
+from flask import Flask
 
 TOKEN = os.getenv("TOKEN")
 
@@ -19,41 +21,41 @@ CHAT_IDS = [
     "-1002758054105"
 ]
 
+# =========================
+# WEB SERVER (FOR RENDER)
+# =========================
+
+app_web = Flask(__name__)
+
+@app_web.route("/")
+def home():
+    return "bot is alive"
+
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    app_web.run(host="0.0.0.0", port=port)
+
 
 # =========================
-# GET JOKE
+# JOKE
 # =========================
 
 def get_joke():
-
     url = "https://www.anekdot.ru/random/anekdot/"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=10
-        )
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
-
-        joke = soup.find(
-            "div",
-            class_="text"
-        )
+        joke = soup.find("div", class_="text")
 
         if joke:
             return joke.get_text(strip=True)
 
     except Exception as e:
-        print(f"Ошибка получения анекдота: {e}")
+        print(f"Error: {e}")
 
     return "Анекдот не найден 😢"
 
@@ -63,17 +65,11 @@ def get_joke():
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(
-        "This bot talkinn someshi 4 no reason"
-    )
+    await update.message.reply_text("This bot talkinn someshi 4 no reason")
 
 
 async def nasral(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(
-        get_joke()
-    )
+    await update.message.reply_text(get_joke())
 
 
 # =========================
@@ -87,19 +83,11 @@ async def auto_send(app):
         joke = get_joke()
 
         for chat_id in CHAT_IDS:
-
             try:
-
-                await app.bot.send_message(
-                    chat_id=chat_id,
-                    text=joke
-                )
-
-                print(f"Отправлено в {chat_id}")
-
+                await app.bot.send_message(chat_id=chat_id, text=joke)
+                print(f"Sent to {chat_id}")
             except Exception as e:
-
-                print(f"Ошибка отправки: {e}")
+                print(f"Error: {e}")
 
         await asyncio.sleep(3600)
 
@@ -108,37 +96,28 @@ async def auto_send(app):
 # MAIN
 # =========================
 
-async def main():
+def main():
 
     if not TOKEN:
         raise ValueError("TOKEN not found")
 
-    app = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .build()
-    )
+    # запускаем веб-сервер (ВАЖНО для Render)
+    threading.Thread(target=run_server, daemon=True).start()
 
-    app.add_handler(
-        CommandHandler("start", start)
-    )
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(
-        CommandHandler("nasral", nasral)
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("nasral", nasral))
 
     print("Bot started")
 
-    asyncio.create_task(
-        auto_send(app)
-    )
+    # безопасный запуск фоновой задачи
+    async def runner():
+        await auto_send(app)
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
+    asyncio.get_event_loop().create_task(runner())
 
-    while True:
-        await asyncio.sleep(3600)
+    app.run_polling(drop_pending_updates=True)
 
 
 # =========================
@@ -146,5 +125,4 @@ async def main():
 # =========================
 
 if __name__ == "__main__":
-
-    asyncio.run(main())
+    main()
