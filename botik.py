@@ -1,85 +1,115 @@
-import asyncio
+import os
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes
+    ContextTypes,
 )
 
-TOKEN = "8642180301:AAEyx8FihXqLgk0gxwCsdqZmnWyTb3Is4rw"
-CHAT_IDS = ["727169692", "5020135485", "624884275","-1002758054105"]
+# =========================
+# LOAD ENV
+# =========================
 
-# ===== ПОЛУЧЕНИЕ АНЕКДОТА =====
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+
+if TOKEN is None:
+    raise ValueError("TOKEN не загружен! Проверь .env файл")
+
+# =========================
+# CHAT IDS
+# =========================
+
+CHAT_IDS = [
+    "727169692",
+    "5020135485",
+    "624884275",
+    "-1002758054105"
+]
+
+# =========================
+# JOKE FUNCTION
+# =========================
 
 def get_joke():
-
     url = "https://www.anekdot.ru/random/anekdot/"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
 
-    response = requests.get(url, headers=headers)
+        joke = soup.find("div", class_="text")
 
-    soup = BeautifulSoup(response.text, "html.parser")
+        if joke:
+            return joke.get_text(strip=True)
 
-    joke = soup.find("div", class_="text")
-
-    if joke:
-        return joke.get_text(strip=True)
+    except Exception as e:
+        print(f"Ошибка получения анекдота: {e}")
 
     return "Анекдот не найден 😢"
 
-# ===== КОМАНДА START =====
+
+# =========================
+# COMMANDS
+# =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    text = (
+    await update.message.reply_text(
         "This bot talking someshit for no reason 🙂"
     )
 
-    await update.message.reply_text(text)
-
-# ===== КОМАНДА JOKE =====
 
 async def joke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(get_joke())
 
-    text = get_joke()
 
-    await update.message.reply_text(text)
+# =========================
+# AUTO SEND (JOB QUEUE)
+# =========================
 
-# ===== АВТОРАССЫЛКА =====
-
-async def auto_send(app):
-
-    while True:
-
-        for chat_id in CHAT_IDS:
-
-            text = get_joke()
-
-            await app.bot.send_message(
+async def send_jokes(context: ContextTypes.DEFAULT_TYPE):
+    for chat_id in CHAT_IDS:
+        try:
+            await context.bot.send_message(
                 chat_id=chat_id,
-                text=text
+                text=get_joke()
             )
+        except Exception as e:
+            print(f"Ошибка отправки в {chat_id}: {e}")
 
-        print("Анекдоты отправлены")
+    print("Анекдоты отправлены")
 
-        await asyncio.sleep(3600)
 
-# ===== ЗАПУСК =====
+# =========================
+# MAIN
+# =========================
 
-# запуск
-app = ApplicationBuilder().token(TOKEN).build()
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("nasral", joke))
+    # команды
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("nasral", joke))
 
-import asyncio
-asyncio.get_event_loop().create_task(auto_send(app))
+    # авто-рассылка каждые 3600 секунд (1 час)
+    job_queue = app.job_queue
+    job_queue.run_repeating(send_jokes, interval=3600, first=10)
 
-print("Bot started")
-app.run_polling()
+    print("Bot started")
+
+    # ВАЖНО: без asyncio.run
+    app.run_polling()
+
+
+# =========================
+# START
+# =========================
+
+if __name__ == "__main__":
+    main()
